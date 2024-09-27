@@ -1,9 +1,15 @@
 import os
+import sys
+
+# Add the current directory and projectpackages to the Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+sys.path.insert(0, os.path.join(current_dir, 'projectpackages'))
+
 os.environ['MKL_SERVICE_FORCE_INTEL'] = '1'
 os.environ['MKL_THREADING_LAYER'] = 'GNU'
 import numpy as np
 
-import sys
 import torch
 import requests
 from io import BytesIO
@@ -11,11 +17,11 @@ from PIL import Image
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from bs4 import BeautifulSoup
 
-# Import necessary modules from GOT
-from GOT.utils.conversation import conv_templates, SeparatorStyle
-from GOT.utils.utils import disable_torch_init, KeywordsStoppingCriteria
-from GOT.model import GOTQwenForCausalLM
-from GOT.model.plug.blip_process import BlipImageEvalProcessor
+# Now import from GOT
+from projectpackages.LakeOCR.GOT.utils.conversation import conv_templates, SeparatorStyle
+from projectpackages.LakeOCR.GOT.utils.utils import disable_torch_init, KeywordsStoppingCriteria
+from projectpackages.LakeOCR.GOT.model import GOTQwenForCausalLM
+from projectpackages.LakeOCR.GOT.model.plug.blip_process import BlipImageEvalProcessor
 
 # Constants
 DEFAULT_IMAGE_TOKEN = "<image>"
@@ -33,7 +39,7 @@ def load_image(image_file):
 
 def initialize_ocr_model():
     disable_torch_init()
-    model_name = os.path.join(os.getcwd(), 'GOT-OCR2_0')
+    model_name = 'GOT-OCR2_0'
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     model = GOTQwenForCausalLM.from_pretrained(model_name, low_cpu_mem_usage=True, device_map='cuda', use_safetensors=True, pad_token_id=151643).eval()
     model.to(device='cuda', dtype=torch.bfloat16)
