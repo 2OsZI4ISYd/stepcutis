@@ -1,7 +1,6 @@
 import sys
 import os
 project_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(project_root)
 sys.path.append(os.path.join(project_root, 'projectpackages'))
 sys.path.append(os.path.join(project_root, 'projectpackages', 'LakeOCR'))
 import argparse
@@ -12,13 +11,16 @@ from process_document import process_pdf
 import torch
 from projectpackages.CRAFT import CRAFTModel
 from projectpackages.surya.model.detection.model import load_model, load_processor
-from projectpackages.surya.model.detection.model2 import load_model2, load_processor2
 from projectpackages.surya.settings import settings
 from projectpackages.surya.model.ordering.processor import load_processor as load_ordering_processor
 from projectpackages.surya.model.ordering.model import load_model as load_ordering_model
 import traceback
 import logging
 from bs4 import BeautifulSoup
+from transformers import AutoTokenizer
+from projectpackages.LakeOCR.GOT.model import GOTQwenForCausalLM
+from projectpackages.LakeOCR.GOT.model.plug.blip_process import BlipImageEvalProcessor
+from projectpackages.LakeOCR.GOT.utils.utils import disable_torch_init
 
 def ensure_folders_exist():
     folders = ['partitions', 'regionimages', 'shelves', 'weights']
@@ -134,6 +136,16 @@ def find_pdf_files(directory):
                 pdf_files.append(os.path.join(root, file))
     return pdf_files
 
+def initialize_ocr_model():
+    disable_torch_init()
+    model_name = os.path.join(os.getcwd(), 'GOT-OCR2_0')
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = GOTQwenForCausalLM.from_pretrained(model_name, low_cpu_mem_usage=True, device_map='cuda', use_safetensors=True, pad_token_id=151643).eval()
+    model.to(device='cuda', dtype=torch.float16)
+    image_processor = BlipImageEvalProcessor(image_size=1024)
+    image_processor_high = BlipImageEvalProcessor(image_size=1024)
+    return tokenizer, model, image_processor, image_processor_high
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_dir", required=True, help="Path to the input directory containing PDF files and subdirectories")
@@ -150,10 +162,11 @@ def main():
     processor = load_processor(checkpoint=settings.LAYOUT_MODEL_CHECKPOINT)
     det_model = load_model()
     det_processor = load_processor()
-    det_model2 = load_model2()
-    det_processor2 = load_processor2()
     order_model = load_ordering_model()
     order_processor = load_ordering_processor()
+    
+    # Initialize OCR model
+    ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high = initialize_ocr_model()
 
     pdf_files = find_pdf_files(args.input_dir)
     for input_pdf in pdf_files:
@@ -177,7 +190,9 @@ def main():
                 chunk_input = os.path.join(chunk_input_dir, chunk_file)
                 chunk_output = os.path.join(chunk_output_dir, f"{os.path.splitext(chunk_file)[0]}.html")
                 logging.info(f"Processing chunk: {chunk_file}")
-                process_pdf(chunk_input, chunk_output, craft_word_model, model, processor, det_model, det_processor, det_model2, det_processor2, order_model, order_processor, chunk_num, chunk_size, args.dataset, os.path.dirname(input_pdf), input_pdf)
+                process_pdf(chunk_input, chunk_output, craft_word_model, model, processor, det_model, det_processor, order_model, order_processor, 
+                            ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high,
+                            chunk_num, chunk_size, args.dataset, os.path.dirname(input_pdf), input_pdf)
 
             if args.dataset:
                 combined_html = process_chunks(chunk_output_dir, output_html, create_single_file=False)

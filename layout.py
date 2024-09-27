@@ -4,7 +4,6 @@ import numpy as np
 import os
 from tqdm import tqdm
 from projectpackages.surya.detection import batch_text_detection
-from projectpackages.surya.detection2 import batch_text_detection2
 from projectpackages.surya.layout import batch_layout_detection
 from projectpackages.surya.ordering import batch_ordering
 from projectpackages.surya.schema import TextDetectionResult, PolygonBox, ColumnLine
@@ -66,65 +65,6 @@ def get_shortened_label(label):
 def assign_boxIDs(bounding_boxes):
     return [bbox + [i] for i, bbox in enumerate(bounding_boxes)]
 
-def adjust_bounding_boxes_final(boxes, image_bbox):
-    x_max, y_max = image_bbox[2], image_bbox[3]
-    
-    adjusted_boxes_vertical = [box.copy() for box in boxes]
-    adjusted_boxes_horizontal = [box.copy() for box in boxes]
-
-    while True:
-        changes_made = False
-        for i, box1 in enumerate(adjusted_boxes_vertical):
-            x_1l, y_1b, x_1r, y_1t, label, box_id, position = box1
-            if label in ['Picture', 'Figure']:
-                continue
-            intersection_found = False
-            for j, box2 in enumerate(adjusted_boxes_vertical):
-                if i != j and rectOverlap(box1[:4], box2[:4]):
-                    intersection_found = True
-                    break
-            if not intersection_found:
-                y_1t_new = y_1t + 1 if y_1t < y_max else y_1t
-                y_1b_new = y_1b - 1 if y_1b > 0 else y_1b
-
-                if y_1t_new != y_1t or y_1b_new != y_1b:
-                    adjusted_boxes_vertical[i] = [x_1l, y_1b_new, x_1r, y_1t_new, label, box_id, position]
-                    changes_made = True
-        if not changes_made:
-            break
-
-    while True:
-        changes_made = False
-        for i, box1 in enumerate(adjusted_boxes_horizontal):
-            x_1l, y_1b, x_1r, y_1t, label, box_id, position = box1
-            if label in ['Picture', 'Figure']:
-                continue
-            intersection_found = False
-            for j, box2 in enumerate(adjusted_boxes_horizontal):
-                if i != j and rectOverlap(box1[:4], box2[:4]):
-                    intersection_found = True
-                    break
-            if not intersection_found:
-                x_1l_new = x_1l - 1 if x_1l > 0 else x_1l
-                x_1r_new = x_1r + 1 if x_1r < x_max else x_1r
-                if x_1l_new != x_1l or x_1r_new != x_1r:
-                    adjusted_boxes_horizontal[i] = [x_1l_new, y_1b, x_1r_new, y_1t, label, box_id, position]
-                    changes_made = True
-        if not changes_made:
-            break
-
-    final_adjusted_boxes = []
-    for box_vertical, box_horizontal in zip(adjusted_boxes_vertical, adjusted_boxes_horizontal):
-        x_1l_v, y_1b_v, x_1r_v, y_1t_v, label_v, box_id_v, position_v = box_vertical
-        x_1l_h, y_1b_h, x_1r_h, y_1t_h, label_h, box_id_h, position_h = box_horizontal
-        if label_v in ['Picture', 'Figure']:
-            final_box = box_vertical
-        else:
-            final_box = [x_1l_h, y_1b_v, x_1r_h, y_1t_v, label_v, box_id_v, position_v]
-        final_adjusted_boxes.append(final_box)
-
-    return final_adjusted_boxes
-
 def valueInRange(value, min_val, max_val):
     return (min_val <= value <= max_val)
 
@@ -176,7 +116,9 @@ def process_table_cells(cell_bboxes, column_separators, page_number, image_numbe
     
     return processed_cells
 
-def get_layout(partitions_directory, model, processor, det_model, det_processor, det_model2, det_processor2, order_model, order_processor, craft_bboxes):
+def get_layout(partitions_directory, model, processor, det_model, det_processor, order_model, order_processor, craft_bboxes,
+               ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high):    
+    
     partitions_directory = os.path.join(os.getcwd(), 'partitions')
     page_folders = sorted([folder for folder in os.listdir(partitions_directory) if folder.isdigit()], key=lambda x: int(x))
 
@@ -354,4 +296,4 @@ def get_layout(partitions_directory, model, processor, det_model, det_processor,
                 position = rest[1] if len(rest) > 1 else 0
                 image_tuples.append((pil_image, page_number, position, label, None, None))
 
-    return image_tuples
+    return image_tuples, ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high

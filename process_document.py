@@ -62,7 +62,9 @@ def save_dataset_image(image, original_pdf_filename, page_num, input_dir):
     cv2.imwrite(output_path, image)
 
 
-def process_pdf(input_pdf, output_txt, craft_word_model, model, processor, det_model, det_processor, det_model2, det_processor2, order_model, order_processor, chunk_num, chunk_size, is_dataset_mode=False, input_dir=None, original_pdf_filename=None):
+def process_pdf(input_pdf, output_txt, craft_word_model, model, processor, det_model, det_processor, order_model, order_processor, 
+                ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high,
+                chunk_num, chunk_size, is_dataset_mode=False, input_dir=None, original_pdf_filename=None):
     # Ensure necessary folders exist
     ensure_folders_exist()
 
@@ -151,10 +153,11 @@ def process_pdf(input_pdf, output_txt, craft_word_model, model, processor, det_m
 
     # Run the layout parsing function on the page images in the partitions directory
     print("Running layout parsing")
-    image_tuples = get_layout(partitions_dir, model, processor, det_model, det_processor, det_model2, det_processor2, order_model, order_processor, all_craft_bboxes)
+    image_tuples, _, _, _, _ = get_layout(partitions_dir, model, processor, det_model, det_processor, order_model, order_processor, all_craft_bboxes,
+                              ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high)
 
     # Process the images using the new OCR function
-    html_content = process_images(image_tuples)
+    html_content = process_images(image_tuples, ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high)
 
     # Write the HTML content to the output file
     with open(output_txt, 'w', encoding='utf-8') as f:

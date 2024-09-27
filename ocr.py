@@ -2,29 +2,33 @@ import os
 import sys
 import torch
 from PIL import Image
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from bs4 import BeautifulSoup
 from projectpackages.LakeOCR.GOT.utils.conversation import conv_templates, SeparatorStyle
-from projectpackages.LakeOCR.GOT.utils.utils import disable_torch_init, KeywordsStoppingCriteria
-from projectpackages.LakeOCR.GOT.model import GOTQwenForCausalLM
-from projectpackages.LakeOCR.GOT.model.plug.blip_process import BlipImageEvalProcessor
+from projectpackages.LakeOCR.GOT.utils.utils import KeywordsStoppingCriteria
 from tqdm import tqdm
+import logging
+
+# Label abbreviation mapping
+LABEL_ABBREVIATIONS = {
+    'Caption': 'c',
+    'Footnote': 'fo',
+    'Formula': 'fr',
+    'List-item': 'l',
+    'Page-footer': 'pf',
+    'Page-header': 'ph',
+    'Picture': 'p',
+    'Figure': 'f',
+    'Section-header': 's',
+    'Table': 'a',
+    'Text': 'e',
+    'Title': 'i'
+}
 
 # Constants
 DEFAULT_IMAGE_TOKEN = "<image>"
 DEFAULT_IMAGE_PATCH_TOKEN = '<imgpad>'
 DEFAULT_IM_START_TOKEN = '<img>'
 DEFAULT_IM_END_TOKEN = '</img>'
-
-def initialize_ocr_model():
-    disable_torch_init()
-    model_name = os.path.join(os.getcwd(), 'GOT-OCR2_0')
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = GOTQwenForCausalLM.from_pretrained(model_name, low_cpu_mem_usage=True, device_map='cuda', use_safetensors=True, pad_token_id=151643).eval()
-    model.to(device='cuda', dtype=torch.float16)
-    image_processor = BlipImageEvalProcessor(image_size=1024)
-    image_processor_high = BlipImageEvalProcessor(image_size=1024)
-    return tokenizer, model, image_processor, image_processor_high
 
 def is_rich_image(label):
     return label == 'fr'  # 'fr' stands for formula
@@ -115,7 +119,7 @@ def create_html_element(label, content):
     elif label == 'i':
         element = soup.new_tag('h1', attrs={'class': 'title'})
     else:
-        element = soup.new_tag('div')
+        element = soup.new_tag('div', attrs={'class': f'unknown-{label}'})
     
     element.string = content
     return element
@@ -175,33 +179,29 @@ def generate_html_document(processed_results, table_structures):
     
     return soup.prettify()
 
-def process_images(image_tuples):
-    tokenizer, model, image_processor, image_processor_high = initialize_ocr_model()
-    
+def get_label_abbreviation(label):
+    return LABEL_ABBREVIATIONS.get(label, label)
+
+def process_images(image_tuples, tokenizer, model, image_processor, image_processor_high):
     processed_results = []
     table_structures = {}
     
-    for pil_image, page_num, order_num, label, row, col in tqdm(image_tuples, desc="Processing images", unit="image"):
-        try:
-            ocr_text = process_single_image(pil_image, tokenizer, model, image_processor, image_processor_high, label)
-            result = {
-                'pageNum': page_num,
-                'orderNum': order_num,
-                'label': label,
-                'ocrText': ocr_text
-            }
-            if label == 'a':
-                unique_table_id = f"{page_num}_{order_num}"
-                manage_table_structure({**result, 'row': row, 'col': col, 'uniqueTableId': unique_table_id}, table_structures)
-            else:
-                processed_results.append(result)
-        except Exception as e:
-            tqdm.write(f"Error processing image on page {page_num}, order {order_num}: {str(e)}")
+    for pil_image, page_num, order_num, label, row, col in tqdm(image_tuples, desc="Recognizing Text", unit="image"):
+        # Convert the label to its abbreviation
+        abbreviated_label = get_label_abbreviation(label)            
+        ocr_text = process_single_image(pil_image, tokenizer, model, image_processor, image_processor_high, abbreviated_label)
+        result = {
+            'pageNum': page_num,
+            'orderNum': order_num,
+            'label': abbreviated_label,
+            'ocrText': ocr_text
+        }
+        if abbreviated_label == 'a':
+            unique_table_id = f"{page_num}_{order_num}"
+            manage_table_structure({**result, 'row': row, 'col': col, 'uniqueTableId': unique_table_id}, table_structures)
+        else:
+            processed_results.append(result)
     
     html_content = generate_html_document(processed_results, table_structures)
-
-    # Clean up GPU resources
-    del model
-    torch.cuda.empty_cache()
 
     return html_content
