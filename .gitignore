@@ -8,3 +8,5 @@ __pycache__/
 *.pyo
 pdf_processing.log
 GOT-OCR2_0/
+*.amltmp
+*.amlignore
