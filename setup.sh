@@ -18,8 +18,8 @@ check_command nvcc
 echo "All required tools are installed."
 
 # Proceed with environment setup and package installation
-conda create -n LakeOCR python=3.10 -y
-conda activate LakeOCR
+conda create -n stepcutis python=3.10 -y
+conda activate stepcutis
 pip install -r requirements.txt
 pip install flash-attn==2.6.3 --no-build-isolation
 git lfs install
