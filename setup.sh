@@ -38,6 +38,6 @@ sudo apt-get install git-lfs
 git-lfs install
 git clone https://huggingface.co/stepfun-ai/GOT-OCR2_0
 
-source deactivate
+conda deactivate
 
 echo "Setup completed successfully."
