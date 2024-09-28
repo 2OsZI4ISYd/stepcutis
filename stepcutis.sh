@@ -61,6 +61,9 @@ fi
 INPUT_DIR="$1"
 CHUNK_SIZE="$2"
 
+# Convert INPUT_DIR to absolute path
+INPUT_DIR=$(realpath "$INPUT_DIR")
+
 # Check if INPUT_DIR exists
 if [ ! -d "$INPUT_DIR" ]; then
     echo "Error: Input directory '$INPUT_DIR' does not exist."
@@ -98,8 +101,10 @@ eval "$(conda shell.bash hook)"
 # Activate the stepcutis environment
 conda activate stepcutis
 
+echo "Running stepcutis with INPUT_DIR=$INPUT_DIR and CHUNK_SIZE=$CHUNK_SIZE"
+
 # Run the stepcutis application
-python start.py --input_dir "$INPUT_DIR" --chunk_size "$CHUNK_SIZE"
+python stepcutis.py --input_dir "$INPUT_DIR" --chunk_size "$CHUNK_SIZE"
 
 # Capture the exit status of the Python script
 PYTHON_EXIT_STATUS=$?
