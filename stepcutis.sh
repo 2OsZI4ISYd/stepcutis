@@ -83,9 +83,9 @@ conda activate stepcutis
 CONFIG_FILE="$HOME/.stepcutis_config"
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
-    SCRIPT_PATH="$REPO_DIR/stepcutis.py"
+    SCRIPT_PATH="$REPO_DIR/start.py"
     if [ ! -f "$SCRIPT_PATH" ]; then
-        echo "Error: Cannot find stepcutis.py in $REPO_DIR"
+        echo "Error: Cannot find start.py in $REPO_DIR"
         exit 1
     fi
 else
