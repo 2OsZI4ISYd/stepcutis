@@ -1,7 +1,7 @@
 stepcutis is a document analysis program. It uses:
-- [CRAFT] to generate a synthetic document of each page of each document, effectively "denoising" the visual information on each page. This allows for a superior parsing of text-dense pages and regions in general, especially for messy-scanned documents and historical documents
-- [surya] to parse the layout and find the reading order of the layout regions
-- [GOT-OCR2.0] for region-to-text, allowing for accurate transcription of English and Chinese characters, along with Tex-like transcription of formulas, diagrams, figures, and music notes
+- [boomb0om](https://github.com/boomb0om/CRAFT-text-detection)'s implementation of [CRAFT](https://github.com/clovaai/CRAFT-pytorch) to generate a synthetic document of each page of each document, effectively "denoising" the visual information on each page. This allows for a superior parsing of text-dense pages and regions in general, especially for messy-scanned documents and historical documents
+- Vik Paruchuri's [surya](https://github.com/VikParuchuri/surya) to parse the layout and find the reading order of the layout regions
+- [stepfun](https://www.stepfun.com/)'s [GOT-OCR2.0](https://github.com/VikParuchuri/surya) for region-to-text, allowing for accurate transcription of English and Chinese characters, along with Tex-like transcription of formulas, diagrams, figures, and music notes
 
 ## Prerequisites
 1. Linux
