@@ -99,7 +99,7 @@ eval "$(conda shell.bash hook)"
 conda activate stepcutis
 
 # Run the stepcutis application
-python stepcutis.py --input_dir "$INPUT_DIR" --chunk_size "$CHUNK_SIZE"
+python start.py --input_dir "$INPUT_DIR" --chunk_size "$CHUNK_SIZE"
 
 # Capture the exit status of the Python script
 PYTHON_EXIT_STATUS=$?
