@@ -104,7 +104,7 @@ conda activate stepcutis
 echo "Running stepcutis with INPUT_DIR=$INPUT_DIR and CHUNK_SIZE=$CHUNK_SIZE"
 
 # Run the stepcutis application
-python stepcutis.py --input_dir "$INPUT_DIR" --chunk_size "$CHUNK_SIZE"
+python start.py --input_dir "$INPUT_DIR" --chunk_size "$CHUNK_SIZE"
 
 # Capture the exit status of the Python script
 PYTHON_EXIT_STATUS=$?
