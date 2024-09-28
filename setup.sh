@@ -19,6 +19,12 @@ echo "All required tools are installed."
 # Ensure conda commands can be used in the script
 eval "$(conda shell.bash hook)"
 
+# Check if stepcutis is already installed
+if command -v stepcutis &> /dev/null; then
+    echo "stepcutis is already installed. Please uninstall it first using 'stepcutis uninstall'."
+    exit 1
+fi
+
 # Proceed with environment setup and package installation
 conda create -n stepcutis python=3.10 -y
 conda activate stepcutis
@@ -40,7 +46,22 @@ fi
 # Clone the model repo
 git clone https://huggingface.co/stepfun-ai/GOT-OCR2_0
 
+# Clone the stepcutis repository
+REPO_DIR="$HOME/stepcutis"
+git clone https://github.com/2OsZI4ISYd/stepcutis.git "$REPO_DIR"
+
+# Store the repository location
+echo "$REPO_DIR" > "$HOME/.stepcutis_repo_location"
+
+# Make stepcutis globally accessible
+INSTALL_DIR="/usr/local/bin"
+echo "Installing stepcutis script to $INSTALL_DIR"
+sudo cp "$REPO_DIR/stepcutis" "$INSTALL_DIR/"
+sudo chmod +x "$INSTALL_DIR/stepcutis"
+
 # Deactivate the conda environment
 conda deactivate
 
 echo "Setup completed successfully."
+echo "You can now run 'stepcutis INPUT_DIR CHUNK_SIZE' from any directory."
+echo "To uninstall, run 'stepcutis uninstall'."
