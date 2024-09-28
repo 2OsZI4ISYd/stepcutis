@@ -9,6 +9,7 @@ stepcutis is a document analysis program. It uses:
 3. Conda
 
 ## Setup
+In a terminal:
 ```bash
 git clone https://github.com/2OsZI4ISYd/stepcutis.git
 cd stepcutis
