@@ -19,7 +19,12 @@ chmod +x setup.sh
 ## Usage
 `stepcutis` takes an input directory from the user, finds all of the PDFs in that directory and its subdirectories, converts them to html files, and places those converted files in the same directory as the original PDF files, with the same file name. To run:
 ```bash
-conda run -n stepcutis python start.py --input_dir INPUT_DIR --chunk_size CHUNK_SIZE
+stepcutis INPUT_DIR CHUNK_SIZE
 ```
 - `INPUT_DIR`: the input directory
 - `CHUNK_SIZE`: the number of pages of each PDF to process at a time; increase based on your resources.
+If you'd like to uninstall stepcutis, then run
+```bash
+stepcutis uninstall
+```
+
