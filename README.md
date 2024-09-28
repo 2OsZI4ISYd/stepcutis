@@ -9,16 +9,10 @@ stepcutis is a document analysis program. It uses:
 3. Conda
 
 ## Setup
-1. Clone and enter the repository.
 ```bash
-git clone https://github.com/2OsZI4ISYd/stepcutis.git && cd stepcutis
-```
-2. Make the setup script executable.
-```bash
+git clone https://github.com/2OsZI4ISYd/stepcutis.git
+cd stepcutis
 chmod +x setup.sh
-```
-3. Run the setup script.
-```bash
 ./setup.sh
 ```
 ## Usage
