@@ -10,10 +10,10 @@ uninstall_stepcutis() {
     # Remove the conda environment
     conda remove --name stepcutis --all -y
 
-    # Check for the repository location file
-    REPO_LOCATION_FILE="$HOME/.stepcutis_repo_location"
-    if [ -f "$REPO_LOCATION_FILE" ]; then
-        REPO_DIR=$(cat "$REPO_LOCATION_FILE")
+    # Check for the configuration file
+    CONFIG_FILE="$HOME/.stepcutis_config"
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
         if [ -d "$REPO_DIR" ]; then
             echo "stepcutis repository found at $REPO_DIR"
             read -p "Do you want to remove this directory? (y/n) " -n 1 -r
@@ -27,9 +27,9 @@ uninstall_stepcutis() {
         else
             echo "stepcutis repository not found at $REPO_DIR"
         fi
-        rm "$REPO_LOCATION_FILE"
+        rm "$CONFIG_FILE"
     else
-        echo "Could not find stepcutis repository location file"
+        echo "Could not find stepcutis configuration file"
     fi
 
     # Remove the stepcutis script
@@ -80,12 +80,17 @@ eval "$(conda shell.bash hook)"
 conda activate stepcutis
 
 # Get the repository location
-REPO_LOCATION_FILE="$HOME/.stepcutis_repo_location"
-if [ -f "$REPO_LOCATION_FILE" ]; then
-    REPO_DIR=$(cat "$REPO_LOCATION_FILE")
+CONFIG_FILE="$HOME/.stepcutis_config"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
     SCRIPT_PATH="$REPO_DIR/stepcutis.py"
+    if [ ! -f "$SCRIPT_PATH" ]; then
+        echo "Error: Cannot find stepcutis.py in $REPO_DIR"
+        exit 1
+    fi
 else
-    SCRIPT_PATH="$(dirname "$(readlink -f "$0")")/stepcutis.py"
+    echo "Error: Cannot find stepcutis configuration file."
+    exit 1
 fi
 
 # Run the stepcutis application
