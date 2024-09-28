@@ -1,3 +1,8 @@
+stepcutis is a document analysis program. It uses:
+- [CRAFT] to generate a synthetic document of each page of each document, effectively "denoising" the visual information on each page. This allows for a superior parsing of text-dense pages and regions in general, especially for messy-scanned documents and historical documents
+- [surya] to parse the layout and find the reading order of the layout regions
+- [GOT-OCR2.0] for region-to-text, allowing for accurate transcription of English and Chinese characters, along with Tex-like transcription of formulas, diagrams, figures, and music notes
+
 ## Prerequisites
 1. Linux
 2. CUDA >= 12.1
