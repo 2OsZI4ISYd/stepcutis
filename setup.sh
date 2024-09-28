@@ -46,12 +46,20 @@ fi
 # Clone the model repo
 git clone https://huggingface.co/stepfun-ai/GOT-OCR2_0
 
-# Clone the stepcutis repository
-REPO_DIR="$HOME/stepcutis"
-git clone https://github.com/2OsZI4ISYd/stepcutis.git "$REPO_DIR"
+# Store the current directory as the repository location
+REPO_DIR=$(pwd)
+CONFIG_FILE="$HOME/.stepcutis_config"
+echo "REPO_DIR=$REPO_DIR" > "$CONFIG_FILE"
+echo "Repository location stored in $CONFIG_FILE"
 
-# Store the repository location
-echo "$REPO_DIR" > "$HOME/.stepcutis_repo_location"
+# Rename stepcutis.sh to stepcutis and make it executable
+if [ -f "$REPO_DIR/stepcutis.sh" ]; then
+    mv "$REPO_DIR/stepcutis.sh" "$REPO_DIR/stepcutis"
+    chmod +x "$REPO_DIR/stepcutis"
+else
+    echo "Error: stepcutis.sh not found in the current directory."
+    exit 1
+fi
 
 # Make stepcutis globally accessible
 INSTALL_DIR="/usr/local/bin"
@@ -63,5 +71,6 @@ sudo chmod +x "$INSTALL_DIR/stepcutis"
 conda deactivate
 
 echo "Setup completed successfully."
+echo "Configuration stored in $CONFIG_FILE"
 echo "You can now run 'stepcutis INPUT_DIR CHUNK_SIZE' from any directory."
 echo "To uninstall, run 'stepcutis uninstall'."
