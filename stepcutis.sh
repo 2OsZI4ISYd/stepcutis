@@ -73,19 +73,12 @@ if ! [[ "$CHUNK_SIZE" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
-# Ensure conda commands can be used in the script
-eval "$(conda shell.bash hook)"
-
-# Activate the stepcutis environment
-conda activate stepcutis
-
 # Get the repository location
 CONFIG_FILE="$HOME/.stepcutis_config"
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
-    SCRIPT_PATH="$REPO_DIR/start.py"
-    if [ ! -f "$SCRIPT_PATH" ]; then
-        echo "Error: Cannot find start.py in $REPO_DIR"
+    if [ ! -d "$REPO_DIR" ]; then
+        echo "Error: stepcutis repository directory not found at $REPO_DIR"
         exit 1
     fi
 else
@@ -93,10 +86,35 @@ else
     exit 1
 fi
 
+# Save the current directory
+ORIGINAL_DIR=$(pwd)
+
+# Change to the project directory
+cd "$REPO_DIR" || { echo "Error: Unable to change to directory $REPO_DIR"; exit 1; }
+
+# Ensure conda commands can be used in the script
+eval "$(conda shell.bash hook)"
+
+# Activate the stepcutis environment
+conda activate stepcutis
+
 # Run the stepcutis application
-python "$SCRIPT_PATH" --input_dir "$INPUT_DIR" --chunk_size "$CHUNK_SIZE"
+python stepcutis.py --input_dir "$INPUT_DIR" --chunk_size "$CHUNK_SIZE"
+
+# Capture the exit status of the Python script
+PYTHON_EXIT_STATUS=$?
 
 # Deactivate the conda environment
 conda deactivate
 
-echo "stepcutis application execution completed."
+# Change back to the original directory
+cd "$ORIGINAL_DIR" || { echo "Error: Unable to change back to original directory"; exit 1; }
+
+if [ $PYTHON_EXIT_STATUS -eq 0 ]; then
+    echo "stepcutis application execution completed successfully."
+else
+    echo "stepcutis application execution failed with exit status $PYTHON_EXIT_STATUS."
+fi
+
+# Exit with the same status as the Python script
+exit $PYTHON_EXIT_STATUS
