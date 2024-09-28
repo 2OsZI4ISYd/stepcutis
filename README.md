@@ -23,6 +23,7 @@ stepcutis INPUT_DIR CHUNK_SIZE
 ```
 - `INPUT_DIR`: the input directory
 - `CHUNK_SIZE`: the number of pages of each PDF to process at a time; increase based on your resources.
+-----
 If you'd like to uninstall stepcutis, then run
 ```bash
 stepcutis uninstall
