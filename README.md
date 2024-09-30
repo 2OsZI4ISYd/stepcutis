@@ -11,10 +11,7 @@ stepcutis is a document analysis program. It uses:
 ## Setup
 In a terminal:
 ```bash
-git clone https://github.com/2OsZI4ISYd/stepcutis.git
-cd stepcutis
-chmod +x setup.sh
-./setup.sh
+curl -sSL https://github.com/2OsZI4ISYd/stepcutis/raw/refs/heads/master/grab.sh | bash
 ```
 ## Usage
 `stepcutis` takes an input directory from the user, finds all of the PDFs in that directory and its subdirectories, converts them to html files, and places those converted files in the same directory as the original PDF files, with the same file name. To run:
