@@ -14,6 +14,8 @@ from projectpackages.surya.model.detection.model import load_model, load_process
 from projectpackages.surya.settings import settings
 from projectpackages.surya.model.ordering.processor import load_processor as load_ordering_processor
 from projectpackages.surya.model.ordering.model import load_model as load_ordering_model
+from projectpackages.surya.model.table_rec.model import load_model as load_table_model
+from projectpackages.surya.model.table_rec.processor import load_processor as load_table_processor
 import traceback
 import logging
 from bs4 import BeautifulSoup
@@ -164,6 +166,8 @@ def main():
     det_processor = load_processor()
     order_model = load_ordering_model()
     order_processor = load_ordering_processor()
+    table_model = load_table_model()
+    table_processor = load_table_processor()
     
     # Initialize OCR model
     ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high = initialize_ocr_model()
@@ -190,7 +194,7 @@ def main():
                 chunk_input = os.path.join(chunk_input_dir, chunk_file)
                 chunk_output = os.path.join(chunk_output_dir, f"{os.path.splitext(chunk_file)[0]}.html")
                 logging.info(f"Processing chunk: {chunk_file}")
-                process_pdf(chunk_input, chunk_output, craft_word_model, model, processor, det_model, det_processor, order_model, order_processor, 
+                process_pdf(chunk_input, chunk_output, craft_word_model, model, processor, det_model, det_processor, table_model, table_processor, order_model, order_processor, 
                             ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high,
                             chunk_num, chunk_size, args.dataset, os.path.dirname(input_pdf), input_pdf)
 

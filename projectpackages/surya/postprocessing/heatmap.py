@@ -69,13 +69,6 @@ def get_dynamic_thresholds(linemap, text_threshold, low_text, typical_top10_avg=
     return text_threshold, low_text
 
 
-def fast_contours_cumsum(segmap):
-    # Nonzero is slow, so use this, then mod and div to get x, y
-    # x and y are flipped in the output because openCV uses (y, x) instead of (x, y)
-    flat_indices = np.flatnonzero(segmap)
-    return np.column_stack((flat_indices % segmap.shape[1], flat_indices // segmap.shape[1]))
-
-
 def detect_boxes(linemap, text_threshold, low_text):
     # From CRAFT - https://github.com/clovaai/CRAFT-pytorch
     # Modified to return boxes and for speed, accuracy
@@ -89,7 +82,6 @@ def detect_boxes(linemap, text_threshold, low_text):
     det = []
     confidences = []
     max_confidence = 0
-    segmap = np.zeros_like(labels, dtype=np.uint8)
 
     for k in range(1, label_count):
         # size filtering
@@ -97,33 +89,37 @@ def detect_boxes(linemap, text_threshold, low_text):
         if size < 10:
             continue
 
-        mask = labels == k
-        selected_linemap = linemap[mask]
-
-        # thresholding
-        if np.max(selected_linemap) < text_threshold:
-            continue
-
         # make segmentation map
         x, y, w, h = stats[k, [cv2.CC_STAT_LEFT, cv2.CC_STAT_TOP, cv2.CC_STAT_WIDTH, cv2.CC_STAT_HEIGHT]]
 
         try:
-            niter = int(np.sqrt(size * min(w, h) / (w * h)) * 2)
+            niter = int(np.sqrt(min(w, h)))
         except ValueError:
-            # Overflow when size is too large
             niter = 0
 
-        sx, sy = max(0, x - niter), max(0, y - niter)
-        ex, ey = min(img_w, x + w + niter + 1), min(img_h, y + h + niter + 1)
+        buffer = 1
+        sx, sy = max(0, x - niter - buffer), max(0, y - niter - buffer)
+        ex, ey = min(img_w, x + w + niter + buffer), min(img_h, y + h + niter + buffer)
 
-        segmap.fill(0)
-        segmap[mask] = 255
+        mask = (labels[sy:ey, sx:ex] == k)
+        selected_linemap = linemap[sy:ey, sx:ex][mask]
+        line_max = np.max(selected_linemap)
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(1 + niter, 1 + niter))
-        segmap[sy:ey, sx:ex] = cv2.dilate(segmap[sy:ey, sx:ex], kernel)
+        # thresholding
+        if line_max < text_threshold:
+            continue
+
+        segmap = mask.astype(np.uint8)
+
+        ksize = buffer + niter
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(ksize, ksize))
+        selected_segmap = cv2.dilate(segmap, kernel)
 
         # make box
-        np_contours = fast_contours_cumsum(segmap)
+        indices = np.nonzero(selected_segmap)
+        x_inds = indices[1] + sx
+        y_inds = indices[0] + sy
+        np_contours = np.column_stack((x_inds, y_inds))
         rectangle = cv2.minAreaRect(np_contours)
         box = cv2.boxPoints(rectangle)
 
@@ -140,15 +136,15 @@ def detect_boxes(linemap, text_threshold, low_text):
         box = np.roll(box, 4-startidx, 0)
         box = np.array(box)
 
-        confidence = np.mean(selected_linemap[selected_linemap > low_text])
-        max_confidence = max(max_confidence, confidence)
+        confidence = line_max
+        max_confidence = max(max_confidence, line_max)
 
         confidences.append(confidence)
         det.append(box)
 
     if max_confidence > 0:
         confidences = [c / max_confidence for c in confidences]
-    return det, labels, confidences
+    return det, confidences
 
 
 def get_detected_boxes(textmap, text_threshold=None,  low_text=None) -> List[PolygonBox]:
@@ -160,7 +156,7 @@ def get_detected_boxes(textmap, text_threshold=None,  low_text=None) -> List[Pol
 
     textmap = textmap.copy()
     textmap = textmap.astype(np.float32)
-    boxes, labels, confidences = detect_boxes(textmap, text_threshold, low_text)
+    boxes, confidences = detect_boxes(textmap, text_threshold, low_text)
     # From point form to box form
     boxes = [PolygonBox(polygon=box, confidence=confidence) for box, confidence in zip(boxes, confidences)]
     return boxes
@@ -176,16 +172,23 @@ def get_and_clean_boxes(textmap, processor_size, image_size, text_threshold=None
     return bboxes
 
 
-def draw_bboxes_on_image(bboxes, image, labels=None):
-    draw = ImageDraw.Draw(image)
 
-    for bbox in bboxes:
-        draw.rectangle(bbox, outline="red", width=1)
+def draw_bboxes_on_image(bboxes, image, labels=None, label_font_size=10, color='red'):
+    polys = []
+    for bb in bboxes:
+        # Clockwise polygon
+        poly = [
+            [bb[0], bb[1]],
+            [bb[2], bb[1]],
+            [bb[2], bb[3]],
+            [bb[0], bb[3]]
+        ]
+        polys.append(poly)
 
-    return image
+    return draw_polys_on_image(polys, image, labels, label_font_size=label_font_size, color=color)
 
 
-def draw_polys_on_image(corners, image, labels=None, box_padding=-1, label_offset=1, label_font_size=10):
+def draw_polys_on_image(corners, image, labels=None, box_padding=-1, label_offset=1, label_font_size=10, color='red'):
     draw = ImageDraw.Draw(image)
     font_path = get_font_path()
     label_font = ImageFont.truetype(font_path, label_font_size)
@@ -193,7 +196,7 @@ def draw_polys_on_image(corners, image, labels=None, box_padding=-1, label_offse
     for i in range(len(corners)):
         poly = corners[i]
         poly = [(int(p[0]), int(p[1])) for p in poly]
-        draw.polygon(poly, outline='red', width=1)
+        draw.polygon(poly, outline=color, width=1)
 
         if labels is not None:
             label = labels[i]
@@ -212,7 +215,7 @@ def draw_polys_on_image(corners, image, labels=None, box_padding=-1, label_offse
             draw.text(
                 text_position,
                 label,
-                fill="red",
+                fill=color,
                 font=label_font
             )
 

@@ -1,11 +1,12 @@
-from dataclasses import dataclass
-
-import torch
 from transformers import PretrainedConfig
-from transformers.utils import ModelOutput
+from surya.settings import settings
+
+BOX_DIM = 1024
+SPECIAL_TOKENS = 7
+MAX_ROWS = 384
 
 
-class SuryaOCRConfig(PretrainedConfig):
+class SuryaTableRecConfig(PretrainedConfig):
     model_type = "vision-encoder-decoder"
     is_composition = True
 
@@ -14,9 +15,11 @@ class SuryaOCRConfig(PretrainedConfig):
 
         encoder_config = kwargs.pop("encoder")
         decoder_config = kwargs.pop("decoder")
+        text_enc_config = kwargs.pop("text_encoder")
 
         self.encoder = encoder_config
         self.decoder = decoder_config
+        self.text_encoder = text_enc_config
         self.is_encoder_decoder = True
 
         if isinstance(decoder_config, dict):
@@ -29,7 +32,7 @@ class SuryaOCRConfig(PretrainedConfig):
             self.eos_token_id = decoder_config.eos_token_id
 
 
-class DonutSwinConfig(PretrainedConfig):
+class DonutSwinTableRecConfig(PretrainedConfig):
     model_type = "donut-swin"
 
     attribute_map = {
@@ -39,14 +42,14 @@ class DonutSwinConfig(PretrainedConfig):
 
     def __init__(
         self,
-        image_size=(256, 896),
+        image_size=(settings.TABLE_REC_IMAGE_SIZE["width"], settings.TABLE_REC_IMAGE_SIZE["height"]),
         patch_size=4,
         num_channels=3,
         embed_dim=128,
         depths=[2, 2, 14, 2],
         num_heads=[4, 8, 16, 32],
-        num_kv_heads=[1, 2, 4, 8],
-        window_size=7,
+        num_kv_heads=[4, 8, 16, 32],
+        window_size=8,
         mlp_ratio=4.0,
         qkv_bias=True,
         hidden_dropout_prob=0.0,
@@ -56,7 +59,7 @@ class DonutSwinConfig(PretrainedConfig):
         use_absolute_embeddings=True,
         initializer_range=0.02,
         layer_norm_eps=1e-5,
-        encoder_length=256,
+        encoder_length=1024,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -85,16 +88,17 @@ class DonutSwinConfig(PretrainedConfig):
         self.encoder_length = encoder_length
 
 
-class SuryaOCRDecoderConfig(PretrainedConfig):
-    model_type = "surya_ocr"
+class SuryaTableRecDecoderConfig(PretrainedConfig):
+    model_type = "surya_tablerec"
 
     def __init__(
         self,
-        num_hidden_layers=10,
-        vocab_size=65792,
-        hidden_size=1024,
-        intermediate_size=4 * 1024,
-        num_attention_heads=16,
+        num_hidden_layers=3,
+        vocab_size=settings.TABLE_REC_MAX_ROWS + SPECIAL_TOKENS,
+        hidden_size=512,
+        intermediate_size=4 * 512,
+        encoder_hidden_size=1024,
+        num_attention_heads=8,
         lru_width=None,
         attention_window_size=16,
         conv1d_width=4,
@@ -103,22 +107,26 @@ class SuryaOCRDecoderConfig(PretrainedConfig):
         use_cache=True,
         pad_token_id=0,
         eos_token_id=1,
-        bos_token_id=1,
+        bos_token_id=2,
         hidden_activation="gelu_pytorch_tanh",
         rope_theta=10000.0,
         block_types=("attention",),
-        cross_attn_layers=(0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
-        self_attn_layers=(0, 1, 3, 5, 7, 9),
-        global_attn_layers=(0, 1, 3, 5, 7, 9),
+        cross_attn_layers=(0, 1, 2, 3),
+        encoder_cross_attn_layers=(0, 1, 2, 3),
+        self_attn_layers=(0, 1, 2, 3),
+        global_attn_layers=(0, 1, 2, 3),
         attention_dropout=0.0,
-        num_key_value_heads=2,
+        num_key_value_heads=4,
         attention_bias=False,
         w_init_variance_scale=0.01,
         init_std=0.02,
         tie_word_embeddings=False,
-        aux_heads=0,  # How many n-token-ahead heads to add
-        encoder_hidden_size=1024,
-        causal=False,
+        aux_heads=0, # How many n-token-ahead heads to add
+        causal=True,
+        max_classes=2 + SPECIAL_TOKENS,
+        max_width=1024 + SPECIAL_TOKENS,
+        max_height=1024 + SPECIAL_TOKENS,
+        out_box_size=1024,
         **kwargs,
     ):
         self.num_hidden_layers = num_hidden_layers
@@ -149,8 +157,13 @@ class SuryaOCRDecoderConfig(PretrainedConfig):
         self.init_std = init_std
         self.tie_word_embeddings = tie_word_embeddings
         self.aux_heads = aux_heads
-        self.encoder_hidden_size = encoder_hidden_size
+        self.encoder_hidden_size=encoder_hidden_size
         self.causal = causal
+        self.encoder_cross_attn_layers = encoder_cross_attn_layers
+        self.max_classes = max_classes
+        self.max_width = max_width
+        self.max_height = max_height
+        self.out_box_size = out_box_size
 
         super().__init__(
             pad_token_id=pad_token_id,
@@ -164,15 +177,16 @@ class SuryaOCRDecoderConfig(PretrainedConfig):
         return (self.block_types * 100)[: self.num_hidden_layers]
 
 
-class SuryaOCRTextEncoderConfig(PretrainedConfig):
-    model_type = "surya_ocr"
+class SuryaTableRecTextEncoderConfig(PretrainedConfig):
+    model_type = "surya_tablerec"
 
     def __init__(
         self,
-        num_hidden_layers=10,
-        vocab_size=65792,
+        num_hidden_layers=4,
+        vocab_size=settings.TABLE_REC_MAX_ROWS + SPECIAL_TOKENS,
         hidden_size=1024,
         intermediate_size=4 * 1024,
+        encoder_hidden_size=1024,
         num_attention_heads=16,
         lru_width=None,
         attention_window_size=16,
@@ -182,24 +196,23 @@ class SuryaOCRTextEncoderConfig(PretrainedConfig):
         use_cache=True,
         pad_token_id=0,
         eos_token_id=1,
-        bos_token_id=1,
+        bos_token_id=2,
         hidden_activation="gelu_pytorch_tanh",
         rope_theta=10000.0,
         block_types=("attention",),
-        cross_attn_layers=(0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
-        self_attn_layers=(0, 1, 3, 5, 7, 9),
-        global_attn_layers=(0, 1, 3, 5, 7, 9),
+        cross_attn_layers=(0, 1, 2, 3, 4, 5),
+        self_attn_layers=(0, 1, 2, 3, 4, 5),
+        global_attn_layers=(0, 1, 2, 3, 4, 5),
         attention_dropout=0.0,
-        num_key_value_heads=2,
+        num_key_value_heads=16,
         attention_bias=False,
         w_init_variance_scale=0.01,
         init_std=0.02,
         tie_word_embeddings=False,
-        aux_heads=0,  # How many n-token-ahead heads to add
-        encoder_hidden_size=1024,
-        iteration_count=1,
         causal=False,
-        query_token_count=128,
+        max_width=BOX_DIM + SPECIAL_TOKENS,
+        max_height=BOX_DIM + SPECIAL_TOKENS,
+        max_position_embeddings=1024,
         **kwargs,
     ):
         self.num_hidden_layers = num_hidden_layers
@@ -229,11 +242,11 @@ class SuryaOCRTextEncoderConfig(PretrainedConfig):
         self.final_w_init_variance_scale = 2.0 / self.num_hidden_layers
         self.init_std = init_std
         self.tie_word_embeddings = tie_word_embeddings
-        self.aux_heads = aux_heads
         self.encoder_hidden_size = encoder_hidden_size
-        self.iteration_count = iteration_count
         self.causal = causal
-        self.query_token_count = query_token_count
+        self.max_width = max_width
+        self.max_height = max_height
+        self.max_position_embeddings = max_position_embeddings
 
         super().__init__(
             pad_token_id=pad_token_id,
@@ -245,104 +258,3 @@ class SuryaOCRTextEncoderConfig(PretrainedConfig):
     @property
     def layers_block_type(self):
         return (self.block_types * 100)[: self.num_hidden_layers]
-
-TOTAL_TOKENS = 65536
-TOKEN_OFFSET = 3 # Pad, eos, bos
-SPECIAL_TOKENS = 253
-TOTAL_VOCAB_SIZE = TOTAL_TOKENS + TOKEN_OFFSET + SPECIAL_TOKENS
-LANGUAGE_MAP = {
-    'af': 0,
-    'am': 1,
-    'ar': 2,
-    'as': 3,
-    'az': 4,
-    'be': 5,
-    'bg': 6,
-    'bn': 7,
-    'br': 8,
-    'bs': 9,
-    'ca': 10,
-    'cs': 11,
-    'cy': 12,
-    'da': 13,
-    'de': 14,
-    'el': 15,
-    'en': 16,
-    'eo': 17,
-    'es': 18,
-    'et': 19,
-    'eu': 20,
-    'fa': 21,
-    'fi': 22,
-    'fr': 23,
-    'fy': 24,
-    'ga': 25,
-    'gd': 26,
-    'gl': 27,
-    'gu': 28,
-    'ha': 29,
-    'he': 30,
-    'hi': 31,
-    'hr': 32,
-    'hu': 33,
-    'hy': 34,
-    'id': 35,
-    'is': 36,
-    'it': 37,
-    'ja': 38,
-    'jv': 39,
-    'ka': 40,
-    'kk': 41,
-    'km': 42,
-    'kn': 43,
-    'ko': 44,
-    'ku': 45,
-    'ky': 46,
-    'la': 47,
-    'lo': 48,
-    'lt': 49,
-    'lv': 50,
-    'mg': 51,
-    'mk': 52,
-    'ml': 53,
-    'mn': 54,
-    'mr': 55,
-    'ms': 56,
-    'my': 57,
-    'ne': 58,
-    'nl': 59,
-    'no': 60,
-    'om': 61,
-    'or': 62,
-    'pa': 63,
-    'pl': 64,
-    'ps': 65,
-    'pt': 66,
-    'ro': 67,
-    'ru': 68,
-    'sa': 69,
-    'sd': 70,
-    'si': 71,
-    'sk': 72,
-    'sl': 73,
-    'so': 74,
-    'sq': 75,
-    'sr': 76,
-    'su': 77,
-    'sv': 78,
-    'sw': 79,
-    'ta': 80,
-    'te': 81,
-    'th': 82,
-    'tl': 83,
-    'tr': 84,
-    'ug': 85,
-    'uk': 86,
-    'ur': 87,
-    'uz': 88,
-    'vi': 89,
-    'xh': 90,
-    'yi': 91,
-    'zh': 92,
-    "_math": 93
-}

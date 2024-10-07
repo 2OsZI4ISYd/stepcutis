@@ -6,7 +6,7 @@ import torch.utils.checkpoint
 from torch import nn
 from transformers.utils import ModelOutput
 
-from surya.model.recognition.config import SuryaOCRDecoderConfig, SuryaOCRTextEncoderConfig
+from surya.model.table_rec.config import SuryaTableRecDecoderConfig, SuryaTableRecTextEncoderConfig
 from transformers import PreTrainedModel
 from transformers.activations import ACT2FN
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
@@ -17,15 +17,14 @@ from surya.settings import settings
 
 _MAX_SQRT_GRADIENT = 1000.0
 
-
 @dataclass
-class OCRModelOutput(ModelOutput):
-    logits: torch.Tensor
-    aux_logits: torch.Tensor | None = None
+class TableRecModelOutput(ModelOutput):
+    bbox_logits: torch.Tensor
+    class_logits: torch.Tensor | None = None
     hidden_states: torch.Tensor | None = None
 
 
-class SuryaOCRDecoderRMSNorm(nn.Module):
+class SuryaTableRecDecoderRMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
@@ -36,7 +35,7 @@ class SuryaOCRDecoderRMSNorm(nn.Module):
 
     def forward(self, x):
         output = self._norm(x.float())
-        # Llama does x.to(float16) * w whilst SuryaOCRDecoder is (x * w).to(float16)
+        # Llama does x.to(float16) * w whilst SuryaTableRecDecoder is (x * w).to(float16)
         # See https://github.com/huggingface/transformers/pull/29402
         output = output * (1.0 + self.weight.float())
         return output.type_as(x)
@@ -45,10 +44,10 @@ class SuryaOCRDecoderRMSNorm(nn.Module):
         return f"{tuple(self.weight.shape)}, eps={self.eps}"
 
 
-ALL_LAYERNORM_LAYERS.append(SuryaOCRDecoderRMSNorm)
+ALL_LAYERNORM_LAYERS.append(SuryaTableRecDecoderRMSNorm)
 
 
-class SuryaOCRDecoderRotaryEmbedding(nn.Module):
+class SuryaTableRecDecoderRotaryEmbedding(nn.Module):
     def __init__(self, dim, base=10000, device=None):
         super().__init__()
         self.dim = dim
@@ -57,7 +56,7 @@ class SuryaOCRDecoderRotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", tensor=inv_freq, persistent=False)
 
     @torch.no_grad()
-    # Copied from transformers.models.gemma.modeling_gemma.GemmaRotaryEmbedding.forward with Gemma->SuryaOCRDecoder
+    # Copied from transformers.models.gemma.modeling_gemma.GemmaRotaryEmbedding.forward with Gemma->SuryaTableRecDecoder
     def forward(self, x, position_ids, seq_len=None):
         # x: [bs, num_attention_heads, seq_len, head_size]
         self.inv_freq.to(x.device)
@@ -118,12 +117,12 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-class SuryaOCRDecoderSdpaCrossAttention(nn.Module):
+class SuryaTableRecDecoderSdpaCrossAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper
     Modified for GQA
     """
 
-    def __init__(self, config: SuryaOCRDecoderConfig):
+    def __init__(self, config: SuryaTableRecDecoderConfig):
         super().__init__()
         self.config = config
         self.attention_dropout = config.attention_dropout
@@ -137,7 +136,7 @@ class SuryaOCRDecoderSdpaCrossAttention(nn.Module):
         self.k_proj = nn.Linear(self.config.encoder_hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.v_proj = nn.Linear(self.config.encoder_hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.o_proj = nn.Linear(self.num_attention_heads * self.head_dim, self.hidden_size, bias=True)
-        self.rotary_emb = SuryaOCRDecoderRotaryEmbedding(
+        self.rotary_emb = SuryaTableRecDecoderRotaryEmbedding(
             self.head_dim,
             base=config.rope_theta,
         )
@@ -197,10 +196,10 @@ class SuryaOCRDecoderSdpaCrossAttention(nn.Module):
         self.key_states = key_states
 
 
-class SuryaOCRDecoderSdpaAttention(nn.Module):
+class SuryaTableRecDecoderSdpaAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
-    def __init__(self, config: SuryaOCRDecoderConfig):
+    def __init__(self, config: SuryaTableRecDecoderConfig):
         super().__init__()
         self.config = config
         self.attention_dropout = config.attention_dropout
@@ -214,7 +213,7 @@ class SuryaOCRDecoderSdpaAttention(nn.Module):
         self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.o_proj = nn.Linear(self.num_attention_heads * self.head_dim, self.hidden_size, bias=True)
-        self.rotary_emb = SuryaOCRDecoderRotaryEmbedding(
+        self.rotary_emb = SuryaTableRecDecoderRotaryEmbedding(
             self.head_dim,
             base=config.rope_theta,
         )
@@ -318,7 +317,7 @@ class SuryaOCRDecoderSdpaAttention(nn.Module):
         return self._update_dynamic_cache(key_states, value_states, **cache_kwargs)
 
 
-class SuryaOCRDecoderMlp(nn.Module):
+class SuryaTableRecDecoderMlp(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -336,24 +335,24 @@ class SuryaOCRDecoderMlp(nn.Module):
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
 
-class SuryaOCRDecoderLayer(nn.Module):
+class SuryaTableRecDecoderLayer(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
         super().__init__()
-        self.cross_pre_norm = SuryaOCRDecoderRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.temporal_pre_norm = SuryaOCRDecoderRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.cross_pre_norm = SuryaTableRecDecoderRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.temporal_pre_norm = SuryaTableRecDecoderRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         self.temporal_block = None
         if layer_idx in config.self_attn_layers:
-            self.temporal_block = SuryaOCRDecoderSdpaAttention(config)
+            self.temporal_block = SuryaTableRecDecoderSdpaAttention(config)
 
         self.cross_attn_block = None
         if layer_idx in config.cross_attn_layers:
-            self.cross_attn_block = SuryaOCRDecoderSdpaCrossAttention(config)
+            self.cross_attn_block = SuryaTableRecDecoderSdpaCrossAttention(config)
 
         self.window_attn = layer_idx not in config.global_attn_layers
-        self.channel_pre_norm = SuryaOCRDecoderRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.mlp_block = SuryaOCRDecoderMlp(config)
+        self.channel_pre_norm = SuryaTableRecDecoderRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.mlp_block = SuryaTableRecDecoderMlp(config)
 
     def forward(
         self,
@@ -394,11 +393,11 @@ class SuryaOCRDecoderLayer(nn.Module):
         return hidden_states
 
 
-class SuryaOCRDecoderPreTrainedModel(PreTrainedModel):
-    config_class = SuryaOCRDecoderConfig
+class SuryaTableRecDecoderPreTrainedModel(PreTrainedModel):
+    config_class = SuryaTableRecDecoderConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["SuryaOCRDecoderLayer"]
+    _no_split_modules = ["SuryaTableRecDecoderLayer"]
     _skip_keys_device_placement = ["cache"]
     _supports_flash_attn_2 = False
     _supports_sdpa = False  # we can't compare with eager for now
@@ -406,7 +405,7 @@ class SuryaOCRDecoderPreTrainedModel(PreTrainedModel):
     _supports_quantized_cache = True
 
     def _init_weights(self, module):
-        if isinstance(module, SuryaOCRDecoderSdpaAttention):
+        if isinstance(module, SuryaTableRecDecoderSdpaAttention):
             torch.nn.init.normal_(module.q_proj.weight, mean=0.0, std=self.config.init_std)
             torch.nn.init.normal_(module.k_proj.weight, mean=0.0, std=self.config.init_std)
             torch.nn.init.normal_(module.v_proj.weight, mean=0.0, std=self.config.init_std)
@@ -439,25 +438,123 @@ class SuryaOCRDecoderPreTrainedModel(PreTrainedModel):
         pass
 
 
-class SuryaOCRDecoderModel(SuryaOCRDecoderPreTrainedModel):
+class LabelEmbedding(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.vocab_size = config.vocab_size
+        self.x1_embed = nn.Embedding(config.max_width, config.hidden_size)
+        self.y1_embed = nn.Embedding(config.max_height, config.hidden_size)
+        self.x2_embed = nn.Embedding(config.max_width, config.hidden_size)
+        self.y2_embed = nn.Embedding(config.max_height, config.hidden_size)
+        self.w_embed = nn.Embedding(config.max_width, config.hidden_size)
+        self.h_embed = nn.Embedding(config.max_height, config.hidden_size)
+        self.cx_embed = nn.Embedding(config.max_width, config.hidden_size)
+        self.cy_embed = nn.Embedding(config.max_height, config.hidden_size)
+        self.class_embed = nn.Embedding(config.max_classes, config.hidden_size)
+        self.max_width = config.max_width
+        self.max_height = config.max_height
+        self.max_classes = config.max_classes
+
+    def forward(self, labels: torch.LongTensor, input_box_counts: torch.LongTensor):
+        cx, cy, w, h, class_ = labels.to(torch.long).unbind(dim=-1)
+        # Shape is (batch_size, num_boxes/seq len, d_model)
+        x1 = (cx - w // 2).long()
+        y1 = (cy - h // 2).long()
+        x2 = (cx + w // 2).long()
+        y2 = (cy + h // 2).long()
+        x1 = torch.clamp(x1, 0, self.max_width - 1)
+        y1 = torch.clamp(y1, 0, self.max_height - 1)
+        x2 = torch.clamp(x2, 0, self.max_width - 1)
+        y2 = torch.clamp(y2, 0, self.max_height - 1)
+
+        class_ = torch.clamp(class_, 0, self.max_classes - 1).long()
+
+        w = torch.clamp(w, 0, self.max_width - 1).long()
+        h = torch.clamp(h, 0, self.max_height - 1).long()
+        cx = torch.clamp(cx, 0, self.max_width - 1).long()
+        cy = torch.clamp(cy, 0, self.max_height - 1).long()
+
+        coord_embeds = self.x1_embed(x1) + self.y1_embed(y1) + self.x2_embed(x2) + self.y2_embed(y2)
+        class_embeds = self.class_embed(class_)
+        embedded = coord_embeds + self.w_embed(w) + self.h_embed(h) + self.cx_embed(cx) + self.cy_embed(cy) + class_embeds
+
+        return embedded
+
+
+class BboxEmbedding(nn.Module):
+    def __init__(self, config, embed_positions=False):
+        super().__init__()
+        self.x1_embed = nn.Embedding(config.max_width, config.hidden_size)
+        self.y1_embed = nn.Embedding(config.max_height, config.hidden_size)
+        self.x2_embed = nn.Embedding(config.max_width, config.hidden_size)
+        self.y2_embed = nn.Embedding(config.max_height, config.hidden_size)
+        self.w_embed = nn.Embedding(config.max_width, config.hidden_size)
+        self.h_embed = nn.Embedding(config.max_height, config.hidden_size)
+        self.cx_embed = nn.Embedding(config.max_width, config.hidden_size)
+        self.cy_embed = nn.Embedding(config.max_height, config.hidden_size)
+        self.box_pos_embed = nn.Embedding(config.max_position_embeddings, config.hidden_size)
+        self.max_width = config.max_width
+        self.max_height = config.max_height
+        self.embed_positions = embed_positions
+
+    def forward(self, boxes: torch.LongTensor, input_box_counts: torch.LongTensor):
+        x1, y1, x2, y2 = boxes.unbind(dim=-1)
+        x1 = torch.clamp(x1, 0, self.max_width - 1).long()
+        y1 = torch.clamp(y1, 0, self.max_height - 1).long()
+        x2 = torch.clamp(x2, 0, self.max_width - 1).long()
+        y2 = torch.clamp(y2, 0, self.max_height - 1).long()
+
+        # Shape is (batch_size, num_boxes/seq len, d_model)
+        w = x2 - x1
+        h = y2 - y1
+        # Center x and y in torch long tensors
+        cx = (x1 + x2) / 2
+        cy = (y1 + y2) / 2
+        cx = cx.long()
+        cy = cy.long()
+
+        w = torch.clamp(w, 0, self.max_width - 1).long()
+        h = torch.clamp(h, 0, self.max_height - 1).long()
+        cx = torch.clamp(cx, 0, self.max_width - 1).long()
+        cy = torch.clamp(cy, 0, self.max_height - 1).long()
+
+        coord_embeds = self.x1_embed(x1) + self.y1_embed(y1) + self.x2_embed(x2) + self.y2_embed(y2)
+        embedded = coord_embeds + self.w_embed(w) + self.h_embed(h) + self.cx_embed(cx) + self.cy_embed(cy)
+
+        # Add in positional embeddings for the boxes and labels
+        if self.embed_positions:
+            for j in range(embedded.shape[0]):
+                box_start = input_box_counts[j, 0]
+                box_end = input_box_counts[j, 1] - 1 # Skip the sep token
+                box_count = box_end - box_start
+                embedded[j, box_start:box_end] = embedded[j, box_start:box_end] + self.box_pos_embed.weight[:box_count]
+
+        return embedded
+
+
+class SuryaTableRecDecoderModel(SuryaTableRecDecoderPreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`SuryaOCRDecoderDecoderLayer`]
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`SuryaTableRecDecoderDecoderLayer`]
 
     Args:
-        config: SuryaOCRDecoderConfig
+        config: SuryaTableRecDecoderConfig
     """
 
-    def __init__(self, config: SuryaOCRDecoderConfig):
+    def __init__(self, config: SuryaTableRecDecoderConfig, embed_labels=False, embed_positions=True):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
         self.causal = config.causal
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        if embed_labels:
+            self.embed_tokens = LabelEmbedding(config)
+        else:
+            self.embed_tokens = BboxEmbedding(config, embed_positions=embed_positions)
+
         self.layers = nn.ModuleList(
-            [SuryaOCRDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [SuryaTableRecDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
-        self.final_norm = SuryaOCRDecoderRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.final_norm = SuryaTableRecDecoderRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.gradient_checkpointing = False
 
         self.register_buffer(
@@ -477,6 +574,7 @@ class SuryaOCRDecoderModel(SuryaOCRDecoderPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
+        input_boxes_counts: torch.LongTensor = None,
         position_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         encoder_hidden_states: Optional[torch.FloatTensor] = None,
@@ -493,7 +591,7 @@ class SuryaOCRDecoderModel(SuryaOCRDecoderPreTrainedModel):
         if self.gradient_checkpointing and self.training and use_cache:
             use_cache = False
 
-        inputs_embeds = self.embed_tokens(input_ids)
+        inputs_embeds = self.embed_tokens(input_ids, input_boxes_counts)
         hidden_states = inputs_embeds
 
         if use_cache and prefill:
@@ -543,7 +641,7 @@ class SuryaOCRDecoderModel(SuryaOCRDecoderPreTrainedModel):
         dtype, device = input_tensor.dtype, input_tensor.device
         min_dtype = torch.finfo(dtype).min
         sequence_length = input_tensor.shape[1]
-        target_length = max(settings.RECOGNITION_MAX_TOKENS, sequence_length)
+        target_length = max(settings.TABLE_REC_MAX_BOXES, sequence_length)
 
         diagonal = torch.full((sequence_length, target_length), fill_value=min_dtype, dtype=dtype, device=device)
         causal_mask = diagonal
@@ -571,16 +669,17 @@ class SuryaOCRDecoderModel(SuryaOCRDecoderPreTrainedModel):
         return causal_mask
 
 
-class SuryaOCRDecoder(SuryaOCRDecoderPreTrainedModel):
+class SuryaTableRecDecoder(SuryaTableRecDecoderPreTrainedModel):
     _tied_weights_keys = None
 
     def __init__(self, config, **kwargs):
         super().__init__(config)
-        self.model = SuryaOCRDecoderModel(config)
+        self.model = SuryaTableRecDecoderModel(config, embed_labels=True, embed_positions=False)
         self.vocab_size = config.vocab_size
-        aux_heads = config.aux_heads if config.aux_heads is not None else 0
-        lm_heads = aux_heads + 1
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size * lm_heads, bias=False)
+
+        self.bbox_head = nn.Linear(config.hidden_size, config.max_width * 4, bias=False)
+        self.class_head = nn.Linear(config.hidden_size, config.max_classes, bias=False)
+        self.max_width = config.max_width
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -614,7 +713,7 @@ class SuryaOCRDecoder(SuryaOCRDecoderPreTrainedModel):
         use_cache: Optional[bool] = None,
         prefill: bool = False,
         **kwargs
-    ) -> Union[Tuple, OCRModelOutput]:
+    ) -> Union[Tuple, TableRecModelOutput]:
         outputs = self.model(
             input_ids=input_ids,
             cache_position=cache_position,
@@ -628,29 +727,28 @@ class SuryaOCRDecoder(SuryaOCRDecoderPreTrainedModel):
         )
 
         hidden_states = outputs[0]
-        all_logits = self.lm_head(hidden_states)
-        all_logits = torch.split(all_logits, self.vocab_size, dim=-1)
-        logits = all_logits[0]
-        aux_logits = all_logits[1:] if len(all_logits) > 1 else None
+        bbox_logits = self.bbox_head(hidden_states)
+        class_logits = self.class_head(hidden_states)
+        bsz, seq_len = class_logits.shape[:2]
+        bbox_logits = bbox_logits.view(bsz, seq_len, 4, self.max_width)
 
-        return OCRModelOutput(
-            logits=logits,
-            aux_logits=aux_logits,
-            hidden_states=outputs.hidden_states,
+        return TableRecModelOutput(
+            bbox_logits=bbox_logits,
+            class_logits=class_logits,
+            hidden_states=hidden_states,
         )
-
 @dataclass
 class TextEncoderOutput(CausalLMOutput):
     hidden_states: torch.FloatTensor = None
 
 
-class SuryaOCRTextEncoder(SuryaOCRDecoderPreTrainedModel):
+class SuryaTableRecTextEncoder(SuryaTableRecDecoderPreTrainedModel):
     _tied_weights_keys = None
-    config_class = SuryaOCRTextEncoderConfig
+    config_class = SuryaTableRecTextEncoderConfig
 
     def __init__(self, config, **kwargs):
         super().__init__(config)
-        self.model = SuryaOCRDecoderModel(config)
+        self.model = SuryaTableRecDecoderModel(config, embed_labels=False, embed_positions=True)
         self.vocab_size = config.vocab_size
 
         # Initialize weights and apply final processing
@@ -671,7 +769,8 @@ class SuryaOCRTextEncoder(SuryaOCRDecoderPreTrainedModel):
     # Ignore copy
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
+        input_boxes: Optional[torch.LongTensor] = None,
+        input_boxes_counts: Optional[torch.LongTensor] = None,
         cache_position: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         encoder_hidden_states: Optional[torch.FloatTensor] = None,
@@ -680,7 +779,8 @@ class SuryaOCRTextEncoder(SuryaOCRDecoderPreTrainedModel):
         **kwargs
     ) -> Union[Tuple, CausalLMOutput]:
         outputs = self.model(
-            input_ids=input_ids,
+            input_ids=input_boxes,
+            input_boxes_counts=input_boxes_counts,
             cache_position=cache_position,
             attention_mask=attention_mask,
             encoder_hidden_states=encoder_hidden_states,

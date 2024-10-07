@@ -1,6 +1,8 @@
+import math
 from typing import Dict, Union, Optional, List, Iterable
 
 import cv2
+import torch
 from torch import TensorType
 from transformers import DonutImageProcessor, DonutProcessor
 from transformers.image_processing_utils import BatchFeature
@@ -11,13 +13,21 @@ from PIL import Image
 import PIL
 from surya.model.recognition.tokenizer import Byt5LangTokenizer
 from surya.settings import settings
+from surya.model.table_rec.config import BOX_DIM, SPECIAL_TOKENS
 
 
 def load_processor():
     processor = SuryaProcessor()
     processor.image_processor.train = False
-    processor.image_processor.max_size = settings.RECOGNITION_IMAGE_SIZE
-    processor.tokenizer.model_max_length = settings.RECOGNITION_MAX_TOKENS
+    processor.image_processor.max_size = settings.TABLE_REC_IMAGE_SIZE
+
+    processor.token_pad_id = 0
+    processor.token_eos_id = 1
+    processor.token_bos_id = 2
+    processor.token_row_id = 3
+    processor.token_unused_id = 4
+    processor.box_size = (BOX_DIM, BOX_DIM)
+    processor.special_token_count = SPECIAL_TOKENS
     return processor
 
 
@@ -40,13 +50,6 @@ class SuryaImageProcessor(DonutImageProcessor):
 
     def process_inner(self, images: List[np.ndarray]):
         assert images[0].shape[2] == 3 # RGB input images, channel dim last
-
-        # Rotate if the bbox is wider than it is tall
-        images = [SuryaImageProcessor.align_long_axis(image, size=self.max_size, input_data_format=ChannelDimension.LAST) for image in images]
-
-        # Verify that the image is wider than it is tall
-        for img in images:
-            assert img.shape[1] >= img.shape[0]
 
         # This also applies the right channel dim format, to channel x height x width
         images = [SuryaImageProcessor.numpy_resize(img, self.max_size, self.resample) for img in images]
@@ -168,39 +171,77 @@ class SuryaImageProcessor(DonutImageProcessor):
 class SuryaProcessor(DonutProcessor):
     def __init__(self, image_processor=None, tokenizer=None, train=False, **kwargs):
         image_processor = SuryaImageProcessor.from_pretrained(settings.RECOGNITION_MODEL_CHECKPOINT)
-        tokenizer = Byt5LangTokenizer()
         if image_processor is None:
             raise ValueError("You need to specify an `image_processor`.")
-        if tokenizer is None:
-            raise ValueError("You need to specify a `tokenizer`.")
 
+        tokenizer = Byt5LangTokenizer()
         super().__init__(image_processor, tokenizer)
         self.current_processor = self.image_processor
         self._in_target_context_manager = False
+        self.max_input_boxes = kwargs.get("max_input_boxes", 256)
+        self.extra_input_boxes = kwargs.get("extra_input_boxes", 64)
+
+    def resize_boxes(self, img, boxes):
+        width, height = img.size
+        box_width, box_height = self.box_size
+        for box in boxes:
+            # Rescale to 0-1024
+            box[0] = box[0] / width * box_width
+            box[1] = box[1] / height * box_height
+            box[2] = box[2] / width * box_width
+            box[3] = box[3] / height * box_height
+
+            if box[0] < 0:
+                box[0] = 0
+            if box[1] < 0:
+                box[1] = 0
+            if box[2] > box_width:
+                box[2] = box_width
+            if box[3] > box_height:
+                box[3] = box_height
+
+        return boxes
 
     def __call__(self, *args, **kwargs):
-        images = kwargs.pop("images", None)
-        text = kwargs.pop("text", None)
-        langs = kwargs.pop("langs", None)
+        images = kwargs.pop("images", [])
+        boxes = kwargs.pop("boxes", [])
+        assert len(images) == len(boxes)
 
         if len(args) > 0:
             images = args[0]
             args = args[1:]
 
-        if images is None and text is None:
-            raise ValueError("You need to specify either an `images` or `text` input to process.")
+        for i in range(len(boxes)):
+            if len(boxes[i]) > self.max_input_boxes:
+                downsample_ratio = math.ceil(len(boxes[i]) / self.max_input_boxes)
+                boxes[i] = boxes[i][::downsample_ratio]
 
-        if images is not None:
-            inputs = self.image_processor(images, *args, **kwargs)
+        new_boxes = []
+        max_len = max([len(b) for b in boxes]) + 1 + self.extra_input_boxes
+        box_masks = []
+        box_ends = []
+        for i in range(len(boxes)):
+            nb = self.resize_boxes(images[i], boxes[i])
+            nb = [[b + self.special_token_count for b in box] for box in nb] # shift up
 
-        if text is not None:
-            encodings = self.tokenizer(text, langs, **kwargs)
+            nb.insert(0, [self.token_row_id] * 4) # Insert special token for max rows/cols
+            for _ in range(self.extra_input_boxes):
+                nb.append([self.token_unused_id] * 4)
 
-        if text is None:
-            return inputs
-        elif images is None:
-            return encodings
-        else:
-            inputs["labels"] = encodings["input_ids"]
-            inputs["langs"] = encodings["langs"]
-            return inputs
+            pad_length = max(max_len, self.max_input_boxes + self.extra_input_boxes) - len(nb)
+            box_mask = [1] * len(nb) + [0] * (pad_length)
+            box_ends.append(len(nb))
+            nb = nb + [[self.token_pad_id] * 4] * pad_length
+
+            new_boxes.append(nb)
+            box_masks.append(box_mask)
+
+        box_ends = torch.tensor(box_ends, dtype=torch.long)
+        box_starts = torch.tensor([0] * len(boxes), dtype=torch.long)
+        box_ranges = torch.stack([box_starts, box_ends], dim=1)
+
+        inputs = self.image_processor(images, *args, **kwargs)
+        inputs["input_boxes"] = torch.tensor(new_boxes, dtype=torch.long)
+        inputs["input_boxes_mask"] = torch.tensor(box_masks, dtype=torch.long)
+        inputs["input_boxes_counts"] = box_ranges
+        return inputs

@@ -62,7 +62,7 @@ def save_dataset_image(image, original_pdf_filename, page_num, input_dir):
     cv2.imwrite(output_path, image)
 
 
-def process_pdf(input_pdf, output_txt, craft_word_model, model, processor, det_model, det_processor, order_model, order_processor, 
+def process_pdf(input_pdf, output_txt, craft_word_model, model, processor, det_model, det_processor, table_model, table_processor, order_model, order_processor, 
                 ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high,
                 chunk_num, chunk_size, is_dataset_mode=False, input_dir=None, original_pdf_filename=None):
     # Ensure necessary folders exist
@@ -113,23 +113,23 @@ def process_pdf(input_pdf, output_txt, craft_word_model, model, processor, det_m
         zoomed_img = cv2.cvtColor(np.frombuffer(zoomed_pix.samples, np.uint8).reshape(zoomed_pix.height, zoomed_pix.width, zoomed_pix.n), cv2.COLOR_BGR2RGB)
 
         # Resize the image using OpenCV
-        scaled_height = 2048
+        scaled_height = zoomed_pix.height
         scaled_width = int(zoomed_img.shape[1] * (scaled_height / zoomed_img.shape[0]))
-        scaled_img = cv2.resize(zoomed_img, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+        # zoomed_img = cv2.resize(zoomed_img, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
 
         # Save the scaled image as "raw.png" in the page folder
         raw_path = os.path.join(page_folder, 'raw.png')
-        cv2.imwrite(raw_path, scaled_img)
+        cv2.imwrite(raw_path, zoomed_img)
 
         # If in dataset mode, save the additional image in the input directory
         if is_dataset_mode:
             dataset_filename = f"{os.path.splitext(os.path.basename(original_pdf_filename))[0]}_{start_page_num + page_num}.png"
             dataset_path = os.path.join(input_dir, dataset_filename)
-            cv2.imwrite(dataset_path, scaled_img)
+            cv2.imwrite(dataset_path, zoomed_img)
 
         # Run CRAFT on the scaled image
         try:
-            polygons = craft_word_model.get_polygons(scaled_img)
+            polygons = craft_word_model.get_polygons(zoomed_img)
             craft_bboxes = [polygon_to_bbox(polygon) for polygon in polygons]
             all_craft_bboxes.append(craft_bboxes)
             
@@ -139,7 +139,7 @@ def process_pdf(input_pdf, output_txt, craft_word_model, model, processor, det_m
             average_height = sum(heights) / len(heights) if len(heights) > 0 else 0
             average_width = sum(widths) / len(widths) if len(widths) > 0 else 0
             
-            denoised_image = np.ones((scaled_img.shape[0], scaled_img.shape[1] * 2, 3), dtype=np.uint8) * 255
+            denoised_image = np.ones((zoomed_img.shape[0], zoomed_img.shape[1] * 2, 3), dtype=np.uint8) * 255
             denoised_image = draw_bounding_boxes(denoised_image, craft_bboxes, average_height, average_width)
             
             denoised_path = os.path.join(page_folder, 'denoised.png')
@@ -153,7 +153,7 @@ def process_pdf(input_pdf, output_txt, craft_word_model, model, processor, det_m
 
     # Run the layout parsing function on the page images in the partitions directory
     print("Running layout parsing")
-    image_tuples, _, _, _, _ = get_layout(partitions_dir, model, processor, det_model, det_processor, order_model, order_processor, all_craft_bboxes,
+    image_tuples, _, _, _, _ = get_layout(partitions_dir, model, processor, det_model, det_processor, table_model, table_processor, order_model, order_processor, all_craft_bboxes,
                               ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high)
 
     # Process the images using the new OCR function

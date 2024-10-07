@@ -10,8 +10,10 @@ import os
 class Settings(BaseSettings):
     # General
     TORCH_DEVICE: Optional[str] = None
-    IMAGE_DPI: int = 200
+    IMAGE_DPI: int = 96 # Used for detection, layout, reading order
+    IMAGE_DPI_HIGHRES: int = 192  # Used for OCR, table rec
     IN_STREAMLIT: bool = False # Whether we're running in streamlit
+    ENABLE_EFFICIENT_ATTENTION: bool = True # Usually keep True, but if you get CUDA errors, setting to False can help
 
     # Paths
     DATA_DIR: str = "data"
@@ -43,10 +45,10 @@ class Settings(BaseSettings):
     DETECTOR_MIN_PARALLEL_THRESH: int = 3 # Minimum number of images before we parallelize
 
     # Text recognition
-    RECOGNITION_MODEL_CHECKPOINT: str = "vikp/surya_rec"
+    RECOGNITION_MODEL_CHECKPOINT: str = "vikp/surya_rec2"
     RECOGNITION_MAX_TOKENS: int = 175
     RECOGNITION_BATCH_SIZE: Optional[int] = None # Defaults to 8 for CPU/MPS, 256 otherwise
-    RECOGNITION_IMAGE_SIZE: Dict = {"height": 196, "width": 896}
+    RECOGNITION_IMAGE_SIZE: Dict = {"height": 256, "width": 896}
     RECOGNITION_RENDER_FONTS: Dict[str, str] = {
         "all": os.path.join(FONT_DIR, "GoNotoCurrent-Regular.ttf"),
         "zh": os.path.join(FONT_DIR, "GoNotoCJKCore.ttf"),
@@ -57,10 +59,10 @@ class Settings(BaseSettings):
     RECOGNITION_BENCH_DATASET_NAME: str = "vikp/rec_bench"
     RECOGNITION_PAD_VALUE: int = 255 # Should be 0 or 255
     RECOGNITION_STATIC_CACHE: bool = False # Static cache for torch compile
-    RECOGNITION_MAX_LANGS: int = 4
+    RECOGNITION_ENCODER_BATCH_DIVISOR: int = 2 # Divisor for batch size in decoder
 
     # Layout
-    LAYOUT_MODEL_CHECKPOINT: str = "vikp/surya_layout3"
+    LAYOUT_MODEL_CHECKPOINT: str = "vikp/surya_layout4"
     LAYOUT_BENCH_DATASET_NAME: str = "vikp/publaynet_bench"
 
     # Ordering
@@ -69,6 +71,14 @@ class Settings(BaseSettings):
     ORDER_MAX_BOXES: int = 256
     ORDER_BATCH_SIZE: Optional[int] = None  # Defaults to 4 for CPU/MPS, 32 otherwise
     ORDER_BENCH_DATASET_NAME: str = "vikp/order_bench"
+
+    # Table Rec
+    TABLE_REC_MODEL_CHECKPOINT: str = "vikp/surya_tablerec"
+    TABLE_REC_IMAGE_SIZE: Dict = {"height": 640, "width": 640}
+    TABLE_REC_MAX_BOXES: int = 512
+    TABLE_REC_MAX_ROWS: int = 384
+    TABLE_REC_BATCH_SIZE: Optional[int] = None
+    TABLE_REC_BENCH_DATASET_NAME: str = "vikp/fintabnet_bench"
 
     # Tesseract (for benchmarks only)
     TESSDATA_PREFIX: Optional[str] = None

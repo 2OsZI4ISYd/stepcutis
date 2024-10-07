@@ -6,46 +6,22 @@ from tqdm import tqdm
 from projectpackages.surya.detection import batch_text_detection
 from projectpackages.surya.layout import batch_layout_detection
 from projectpackages.surya.ordering import batch_ordering
+from projectpackages.surya.tables import batch_table_recognition
 from projectpackages.surya.schema import TextDetectionResult, PolygonBox, ColumnLine
-from sklearn.cluster import DBSCAN
 
 def extract_bounding_boxes(layout_predictions, is_sparse=False):
     bounding_boxes = []
     for layout_result in layout_predictions:
         for layout_box in layout_result.bboxes:
-            if layout_box.label in ['Table', 'Picture', 'Figure']:
+            if layout_box.label in ['Picture', 'Figure']:
                 label = 'Caption'
             else:
-                label = layout_box.label if is_sparse else 'Text'
+                label = layout_box.label
             bounding_boxes.append(layout_box.bbox + [label])
     return bounding_boxes
 
 def filter_text_labels(bounding_boxes):
     return [box for box in bounding_boxes if box[4] != 'Text']
-
-def extract_table_cells(table_region, sparse_line_prediction):
-    cell_bboxes = [bbox for bbox in sparse_line_prediction.bboxes if full_encapsulation(table_region, bbox.bbox)]
-    processed_cells = [cell.bbox for cell in cell_bboxes]
-    
-    if not processed_cells:
-        return [], []
-
-    left_edges = [box[0] for box in processed_cells]
-    right_edges = [box[2] for box in processed_cells]
-    all_edges = left_edges + right_edges
-
-    clustering = DBSCAN(eps=5, min_samples=1).fit(np.array(all_edges).reshape(-1, 1))
-    unique_clusters = np.unique(clustering.labels_)
-
-    column_separators = []
-    for cluster in unique_clusters:
-        cluster_points = np.array(all_edges)[clustering.labels_ == cluster]
-        separator = np.mean(cluster_points)
-        column_separators.append(separator)
-
-    column_separators.sort()
-
-    return processed_cells, column_separators
 
 def shrink_bbox_horizontally(bbox):
     x1, y1, x2, y2 = bbox
@@ -96,27 +72,7 @@ def consolidate_regions(sparse_line_regions, layout_regions):
 
     return consolidated_regions
 
-def process_table_cells(cell_bboxes, column_separators, page_number, image_number):
-    if not cell_bboxes:
-        return []
-
-    y_coords = np.array([bbox[1] for bbox in cell_bboxes])
-    y_clusters = DBSCAN(eps=5, min_samples=1).fit(y_coords.reshape(-1, 1))
-    y_labels = np.unique(y_clusters.labels_)
-
-    processed_cells = []
-    for i, (x1, y1, x2, y2) in enumerate(cell_bboxes):
-        row = np.where(y_labels == y_clusters.labels_[i])[0][0]
-        
-        center_x = (x1 + x2) / 2
-        column = next((i for i, sep in enumerate(column_separators) if center_x < sep), len(column_separators) - 1)
-        
-        filename = f"{page_number}_{image_number}_a_{row}_{column}.png"
-        processed_cells.append((x1, y1, x2, y2, 'a', filename, row, column))
-    
-    return processed_cells
-
-def get_layout(partitions_directory, model, processor, det_model, det_processor, order_model, order_processor, craft_bboxes,
+def get_layout(partitions_directory, model, processor, det_model, det_processor, table_model, table_processor, order_model, order_processor, craft_bboxes,
                ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high):    
     
     partitions_directory = os.path.join(os.getcwd(), 'partitions')
@@ -207,7 +163,6 @@ def get_layout(partitions_directory, model, processor, det_model, det_processor,
     
     order_predictions = batch_ordering(normal_images, vertically_swelled_layout_regions_coords_list, order_model, order_processor)
 
-    original_layout_regions_scaled_with_position_list = []
     image_tuples = []
 
     for page_number, original_layout_regions_scaled, vertically_swelled_layout_regions_scaled_original, order_prediction, raw_image, normal_image_cv, sparse_line_prediction in tqdm(zip(range(len(page_folders)), original_layout_regions_scaled_list, vertically_swelled_layout_regions_scaled_list, order_predictions, raw_images, normal_image_cv_list, sparse_line_predictions), total=len(page_folders), desc="Configuring Region Images"):
@@ -229,71 +184,51 @@ def get_layout(partitions_directory, model, processor, det_model, det_processor,
         normal_cv_height, normal_cv_width, _ = normal_image_cv.shape
         image_bbox = [0, 0, normal_cv_width, normal_cv_height]
 
-        final_regions = []
+        table_images = []
+        table_cells_list = []
+        table_positions = []
+
         for region in ordered_original_layout_regions_scaled:
             if region[4] == 'Table':
-                table_cells, column_separators = extract_table_cells(region[:4], sparse_line_prediction)
-                processed_cells = process_table_cells(table_cells, column_separators, page_number, region[6])
-                final_regions.extend(processed_cells)
-            else:
-                final_regions.append(region)
-
-        original_layout_regions_scaled_with_position_list.append(final_regions)
-
-        raw_height, raw_width, _ = raw_image.shape
-
-        x_scale = raw_width / normal_cv_width
-        y_scale = raw_height / normal_cv_height
-
-        num_images = len(final_regions)
-        num_digits = len(str(num_images))
-
-        for region in final_regions:
-            x1, y1, x2, y2, label, *rest = region
-            scaled_x1 = int(x1 * x_scale)
-            scaled_y1 = int(y1 * y_scale)
-            scaled_x2 = int(x2 * x_scale)
-            scaled_y2 = int(y2 * y_scale)
-            
-            if scaled_x2 <= scaled_x1 or scaled_y2 <= scaled_y1:
-                print(f"Warning: Skipping invalid region in page {page_number}: {region}")
-                continue
-
-            region_image = raw_image[scaled_y1:scaled_y2, scaled_x1:scaled_x2]
-            region_image_rgb = cv2.cvtColor(region_image, cv2.COLOR_BGR2RGB)
-            pil_image = Image.fromarray(region_image_rgb)
-            
-            width, height = pil_image.size
-            longest_side, shortest_side = max(width, height), min(width, height)
-            
-            if longest_side > 0:
-                rescale_factor = 1 if longest_side < 1000 else 1000 / longest_side
-                needs_rescaling = longest_side >= 1000
-                longest_side = min(longest_side, 1000)
+                x1, y1, x2, y2, _, _, position = region
+                table_image = normal_image_cv[int(y1):int(y2), int(x1):int(x2)]
+                table_images.append(Image.fromarray(cv2.cvtColor(table_image, cv2.COLOR_BGR2RGB)))
                 
-                new_width = max(1, int(width * rescale_factor))
-                new_height = max(1, int(height * rescale_factor))
+                cells_in_table = [cell for cell in sparse_line_prediction.bboxes if full_encapsulation(region[:4], cell.bbox)]
+                table_cells = [{"bbox": [cell.bbox[0]-x1, cell.bbox[1]-y1, cell.bbox[2]-x1, cell.bbox[3]-y1]} for cell in cells_in_table]
+                table_cells_list.append(table_cells)
+                table_positions.append((position, (x1, y1, x2, y2)))
+            else:
+                x1, y1, x2, y2, label, _, position = region
+                region_image = raw_image[int(y1):int(y2), int(x1):int(x2)]
+                region_image_rgb = cv2.cvtColor(region_image, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(region_image_rgb)
                 
-                try:
-                    wide_length, narrow_length = int(longest_side * 1.5), int(longest_side + rescale_factor * shortest_side * 0.5)
-                    canvas = Image.new('RGB', (normal_image.width, normal_image.height), color='white')
-                    paste_x = (normal_image.width - pil_image.width) // 2
-                    paste_y = (normal_image.height - pil_image.height) // 2
-                    canvas.paste(pil_image, (paste_x, paste_y))
-                    pil_image = canvas
-                    
-                except Exception as e:
-                    print(f"Error processing image for region in page {page_number}: {str(e)}. Skipping this region.")
-                    continue
-            else:
-                print(f"Warning: Skipping region with invalid dimensions in page {page_number}: {region}")
-                continue
-            
-            if label == 'a':  # Table cell
-                row, col = rest[2], rest[3]
-                image_tuples.append((pil_image, page_number, rest[1], label, row, col))
-            else:
-                position = rest[1] if len(rest) > 1 else 0
                 image_tuples.append((pil_image, page_number, position, label, None, None))
+
+        if table_images:
+            try:
+                table_results = batch_table_recognition(table_images, table_cells_list, table_model, table_processor)
+                for table_result, (position, (table_x1, table_y1, _, _)) in zip(table_results, table_positions):
+                    for cell in table_result.cells:
+                        x1, y1, x2, y2 = cell.bbox
+                        x1 += table_x1
+                        y1 += table_y1
+                        x2 += table_x1
+                        y2 += table_y1
+                        cell_image = raw_image[int(y1):int(y2), int(x1):int(x2)]
+                        cell_image_rgb = cv2.cvtColor(cell_image, cv2.COLOR_BGR2RGB)
+                        pil_image = Image.fromarray(cell_image_rgb)
+                        image_tuples.append((pil_image, page_number, position, 'a', cell.row_id, cell.col_id))
+            except Exception as e:
+                print(f"Error in table recognition for page {page_number}: {str(e)}")
+                # Fallback to original table region if recognition fails
+                for region in ordered_original_layout_regions_scaled:
+                    if region[4] == 'Table':
+                        x1, y1, x2, y2, _, _, position = region
+                        region_image = raw_image[int(y1):int(y2), int(x1):int(x2)]
+                        region_image_rgb = cv2.cvtColor(region_image, cv2.COLOR_BGR2RGB)
+                        pil_image = Image.fromarray(region_image_rgb)
+                        image_tuples.append((pil_image, page_number, position, 'Table', None, None))
 
     return image_tuples, ocr_tokenizer, ocr_model, ocr_image_processor, ocr_image_processor_high
