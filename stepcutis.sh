@@ -3,13 +3,10 @@
 # Function to uninstall stepcutis
 uninstall_stepcutis() {
     echo "Uninstalling stepcutis..."
-
     # Ensure conda commands can be used in the script
     eval "$(conda shell.bash hook)"
-
     # Remove the conda environment
     conda remove --name stepcutis --all -y
-
     # Check for the configuration file
     CONFIG_FILE="$HOME/.stepcutis_config"
     if [ -f "$CONFIG_FILE" ]; then
@@ -31,7 +28,6 @@ uninstall_stepcutis() {
     else
         echo "Could not find stepcutis configuration file"
     fi
-
     # Remove the stepcutis script
     SCRIPT_PATH=$(which stepcutis)
     if [ -n "$SCRIPT_PATH" ]; then
@@ -40,19 +36,70 @@ uninstall_stepcutis() {
     else
         echo "stepcutis script not found in PATH"
     fi
-
     echo "stepcutis has been uninstalled."
     exit 0
 }
 
-# Check for uninstall command
+# Check for uninstall command first
 if [ "$1" = "uninstall" ]; then
     uninstall_stepcutis
 fi
 
-# Rest of the script for normal operation
+# Check for markdown command
+if [ "$1" = "markdown" ]; then
+    if [ "$#" -ne 2 ]; then
+        echo "Usage: stepcutis markdown INPUT_DIR"
+        echo "       stepcutis INPUT_DIR CHUNK_SIZE"
+        echo "       stepcutis uninstall"
+        exit 1
+    fi
+    
+    INPUT_DIR=$(realpath "$2")
+    if [ ! -d "$INPUT_DIR" ]; then
+        echo "Error: Input directory '$INPUT_DIR' does not exist."
+        exit 1
+    fi
+
+    # Get the repository location
+    CONFIG_FILE="$HOME/.stepcutis_config"
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+        if [ ! -d "$REPO_DIR" ]; then
+            echo "Error: stepcutis repository directory not found at $REPO_DIR"
+            exit 1
+        fi
+    else
+        echo "Error: Cannot find stepcutis configuration file."
+        exit 1
+    fi
+
+    # Save the current directory
+    ORIGINAL_DIR=$(pwd)
+    cd "$REPO_DIR" || { echo "Error: Unable to change to directory $REPO_DIR"; exit 1; }
+    
+    # Activate conda environment
+    eval "$(conda shell.bash hook)"
+    conda activate stepcutis
+    
+    echo "Running markdown conversion on INPUT_DIR=$INPUT_DIR"
+    python markdown_funnel.py "$INPUT_DIR"
+    PYTHON_EXIT_STATUS=$?
+    
+    conda deactivate
+    cd "$ORIGINAL_DIR" || { echo "Error: Unable to change back to original directory"; exit 1; }
+    
+    if [ $PYTHON_EXIT_STATUS -eq 0 ]; then
+        echo "Markdown conversion completed successfully."
+    else
+        echo "Markdown conversion failed with exit status $PYTHON_EXIT_STATUS."
+    fi
+    exit $PYTHON_EXIT_STATUS
+fi
+
+# Check arguments for document analysis command
 if [ "$#" -ne 2 ]; then
     echo "Usage: stepcutis INPUT_DIR CHUNK_SIZE"
+    echo "       stepcutis markdown INPUT_DIR"
     echo "       stepcutis uninstall"
     exit 1
 fi
