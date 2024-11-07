@@ -20,6 +20,7 @@ stepcutis INPUT_DIR CHUNK_SIZE
 ```
 - `INPUT_DIR`: the input directory
 - `CHUNK_SIZE`: the number of pages of each PDF to process at a time; increase based on your resources.
+
 There's also a command to convert a directory of stepcutis' HTML files into markdown; it will also convert any other document-like format--such as .msg files, .rtf files, and .xls/xlsk files--into markdown format. To use it, run:
 ```bash
 stepcutis markdown INPUT_DIR
