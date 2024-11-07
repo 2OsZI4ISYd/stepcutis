@@ -43,3 +43,10 @@ verovio==4.3.1
 opencv-python==4.10.0.84
 numpy==1.26.4
 PyMuPDF==1.24.10
+extract-msg==0.52.0
+mammoth==1.8.0
+striprtf==0.0.26
+pandas==2.2.3
+openpyxl==3.1.5
+tabulate==0.9.0
+xlrd==2.0.1
